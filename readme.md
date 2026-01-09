@@ -1,19 +1,19 @@
 # Arch Personal Fast Setup
+It uses ansible-playbook to create a fast and easy to use Arch post-installation setup.
 
-Run the `setup.sh` script after creating your first user
+Run the `setup.sh` script after creating your first user.
 
-Set the best mirrors for BR based users
-
-This will add configurations to:
+This ansible will provide configurations for the following apps:
 - Kitty
 - Zsh
 - OhMyZsh
 - P10k
 
-It's not adding any GUI, you'll have to do it manually after the installation
+The script will also add the best mirrors for people located in Brazil, making the installation faster for those poor souls.
 
-The following are the ones I personally prefer:
+It's not adding any GUI, you'll have to do it manually after the installation.
+The following GUI are the ones I personally prefer:
 - [Gnome](https://wiki.archlinux.org/title/GNOME)
 - [KDE](https://wiki.archlinux.org/title/KDE)
 - [Hyprland](https://wiki.archlinux.org/title/Hyprland)
-
+- [Xfce](https://wiki.archlinux.org/title/Xfce)
