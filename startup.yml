@@ -122,10 +122,10 @@
         name:
           - neovim
           - fzf
-          - firefox
           - nvidia
-          - kitty
           - nvidia-utils
+          - firefox
+          - kitty
           - linux-headers
           - vlc
           - podman
