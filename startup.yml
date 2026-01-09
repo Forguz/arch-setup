@@ -1,0 +1,237 @@
+- name: Arch Personal Setup
+  hosts: localhost
+  connection: local
+
+  tasks:
+    - name: System Config (Requires Sudo)
+      become: true
+      block:
+        - name: Backup and deploy optimized mirrorlist
+          ansible.builtin.copy:
+            src: mirrorlist
+            dest: /etc/pacman.d/mirrorlist
+            backup: yes
+          register: mirrorlist_updated
+
+        - name: Force refresh pacman cache
+          community.general.pacman:
+            update_cache: true
+          when: mirrorlist_updated.changed
+
+        - name: User and Privilege Setup
+          block:
+            - name: Ensure current user is in wheel
+              ansible.builtin.user:
+                name: "{{ ansible_env.SUDO_USER }}"
+                groups: wheel,video,storage
+                shell: /bin/zsh
+                append: yes
+
+            - name: Enable sudo for wheel group
+              ansible.builtin.lineinfile:
+                path: /etc/sudoers
+                regexp: '^# %wheel ALL=\(ALL:ALL\) ALL'
+                line: '%wheel ALL=(ALL:ALL) ALL'
+                validate: '/usr/bin/visudo -cf %s'
+
+        - name: System Localization & Time
+          block:
+            - name: Set timezone
+              community.general.timezone:
+                name: America/Sao_Paulo
+
+            - name: Sync hardware clock
+              ansible.builtin.command: hwclock --systohc
+              changed_when: false
+
+            - name: Set system hostname
+              ansible.builtin.hostname:
+                name: maria
+
+            - name: Ensure locale is generated
+              ansible.builtin.lineinfile:
+                path: /etc/locale.gen
+                regexp: '^#{{ item }}'
+                line: '{{ item }}'
+              loop:
+                - "en_US.UTF-8 UTF-8"
+                - "pt_BR.UTF-8 UTF-8"
+              register: locale_gen
+
+            - name: Run locale-gen
+              ansible.builtin.command: locale-gen
+              when: locale_gen.changed
+
+        - name: Pacman & Repositories
+          block:
+            - name: Enable multilib and extra
+              ansible.builtin.replace:
+                path: /etc/pacman.conf
+                regexp: '^#\[(extra|multilib)\]\n#Include = /etc/pacman.d/mirrorlist'
+                replace: '[\1]\nInclude = /etc/pacman.d/mirrorlist'
+
+            - name: Enable Eye-Candy
+              ansible.builtin.lineinfile:
+                path: /etc/pacman.conf
+                regexp: "{{ item.regexp }}"
+                line: "{{ item.line }}"
+              loop:
+                - { regexp: '^#ParallelDownloads', line: 'ParallelDownloads = 10' }
+                - { regexp: '^#Color', line: 'Color' }
+
+        - name: Bootloader Setup 
+          block:
+            - name: Install Bootloader Packages
+              community.general.pacman:
+                name: [grub, efibootmgr, os-prober, grub-btrfs]
+                state: present
+
+            - name: Install GRUB to EFI
+              ansible.builtin.command:
+                cmd: grub-install --target=x86_64-efi --efi-directory=/boot --bootloader-id=GRUB
+              args:
+                creates: /boot/grub/x86_64-efi/core.efi
+
+            - name: Allow os-prober and generate config
+              ansible.builtin.lineinfile:
+                path: /etc/default/grub
+                regexp: '^#GRUB_DISABLE_OS_PROBER=false'
+                line: 'GRUB_DISABLE_OS_PROBER=false'
+
+            - name: Generate GRUB config
+              ansible.builtin.command: grub-mkconfig -o /boot/grub/grub.cfg
+
+        - name: Bootstrap Paru Dependencies and Shell
+          community.general.pacman:
+            name: [base-devel, rust, zsh]
+            state: present
+
+    - name: AUR Setup (Paru)
+      block:
+        - name: Clone and Install Paru-bin
+          ansible.builtin.shell: |
+            rm -rf /tmp/paru-bin
+            git clone https://aur.archlinux.org/paru-bin.git /tmp/paru-bin
+            cd /tmp/paru-bin && makepkg -si --noconfirm
+          args:
+            creates: /usr/bin/paru
+
+    - name: Install Remaining Packages (Paru)
+      community.general.pacman:
+        executable: paru
+        name:
+          - neovim
+          - fzf
+          - firefox
+          - nvidia
+          - kitty
+          - nvidia-utils
+          - linux-headers
+          - vlc
+          - podman
+          - luarocks
+          - steam
+          - gamescope
+          - asdf-vm
+          - cronie
+          - devscripts
+          - debtap
+          - distrobox
+          - zsh-completions
+          - lib32-gamemode
+          - lib32-libvdpau
+          - lib32-libxnvctrl
+          - lib32-mangohud
+          - lib32-nvidia-utils
+          - lib32-vulkan-icd-loader
+          - ttf-lilex-nerd
+          - ttf-atkinson-hyperlegible
+          - ttf-nerd-fonts-symbols
+          - ttf-nerd-fonts-symbols-common
+          - ttf-nerd-fonts-symbols-mono
+          - ttf-cousine-nerd
+        state: present
+
+    - name: User Configuration
+      block:
+        - name: Ensure config directories exist
+          ansible.builtin.file:
+            path: "{{ item }}"
+            state: directory
+            mode: '0755'
+          loop:
+            - "{{ ansible_user_dir }}/.config"
+            - "{{ ansible_user_dir }}/.config/kitty"
+            - "{{ ansible_user_dir }}/.oh-my-zsh/custom/plugins"
+            - "{{ ansible_user_dir }}/.oh-my-zsh/custom/themes"
+
+        # --- Oh My Zsh & Powerlevel10k Setup ---
+
+        - name: Install Oh My Zsh (via Git)
+          ansible.builtin.git:
+            repo: https://github.com/ohmyzsh/ohmyzsh.git
+            dest: "{{ ansible_user_dir }}/.oh-my-zsh"
+            depth: 1 # Shallow clone to save time
+
+        - name: Install Powerlevel10k Theme
+          ansible.builtin.git:
+            repo: https://github.com/romkatv/powerlevel10k.git
+            dest: "{{ ansible_user_dir }}/.oh-my-zsh/custom/themes/powerlevel10k"
+            depth: 1
+
+        - name: Install Zsh Plugins
+          ansible.builtin.git:
+            repo: "{{ item.repo }}"
+            dest: "{{ ansible_user_dir }}/.oh-my-zsh/custom/plugins/{{ item.name }}"
+            depth: 1
+          loop:
+            - { name: 'zsh-autosuggestions', repo: 'https://github.com/zsh-users/zsh-autosuggestions' }
+            - { name: 'zsh-syntax-highlighting', repo: 'https://github.com/zsh-users/zsh-syntax-highlighting.git' }
+            - { name: 'zsh-vi-mode', repo: 'https://github.com/jeffreytse/zsh-vi-mode' }
+
+        # --- Dotfiles Deployment ---
+
+        - name: Deploy .zshrc configuration
+          ansible.builtin.copy:
+            src: .zshrc
+            dest: "{{ ansible_user_dir }}/.zshrc"
+            backup: yes
+            mode: '0644'
+
+        - name: Configure asdf for Zsh 
+          ansible.builtin.lineinfile:
+            path: "{{ ansible_user_dir }}/.zshrc"
+            line: "source /opt/asdf-vm/asdf.sh"
+            state: present
+
+        - name: Pull nvim config
+          ansible.builtin.git:
+            repo: https://github.com/Forguz/nvim-config.git
+            dest: "{{ ansible_user_dir }}/.config/nvim"
+            version: arch
+            single_branch: yes
+            force: yes
+
+        - name: Deploy .p10k.zsh
+          ansible.builtin.copy:
+            src: p10k.zsh
+            dest: "{{ ansible_user_dir }}/.p10k.zsh"
+            mode: '0644'
+            backup: yes
+
+        - name: Deploy Kitty configuration
+          ansible.builtin.copy:
+            src: kitty.conf
+            dest: "{{ ansible_user_dir }}/.config/kitty/kitty.conf"
+            backup: yes
+
+    - name: Final Service Management
+      become: true
+      ansible.builtin.systemd:
+        name: "{{ item }}"
+        enabled: yes
+        state: started
+      loop:
+        - NetworkManager
+        - cronie
+        - grub-btrfsd
